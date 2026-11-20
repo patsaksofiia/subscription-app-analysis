@@ -1,2 +1,2 @@
 # subscription-app-analysis
-Funnel, cohort and LTV/CAC analysis of a subscription app using SQL, Google Sheets and Tableau
+Analysis of a mobile app for learning English with a subscription model. Tools: SQL (MySQL), Excel, Tableau
