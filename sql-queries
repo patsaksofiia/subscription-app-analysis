@@ -1,0 +1,202 @@
+-- TASK 1
+
+SELECT COUNT(DISTINCT user_id) AS users_count, 'sign_up' AS stage
+FROM streamflow.users
+UNION
+SELECT COUNT(DISTINCT user_id), transaction_type AS stage
+FROM streamflow.transactions
+GROUP BY transaction_type
+ORDER BY
+CASE stage
+WHEN 'sign_up' THEN 1
+WHEN 'trial_start' THEN 2
+WHEN 'first_payment' THEN 3
+WHEN 'renewal' THEN 4
+WHEN 'upgrade' THEN 5
+WHEN 'refund' THEN 6
+END
+
+-- COUNTRIES
+
+SELECT COUNT(DISTINCT u.user_id) AS users_count, 'sign_up' AS stage, u.country
+FROM streamflow.users u
+GROUP BY u.country
+UNION
+SELECT COUNT(DISTINCT t.user_id), t.transaction_type AS stage, u.country
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+GROUP BY t.transaction_type, u.country
+ORDER BY
+CASE stage
+WHEN 'sign_up' THEN 1
+WHEN 'trial_start' THEN 2
+WHEN 'first_payment' THEN 3
+WHEN 'renewal' THEN 4
+WHEN 'upgrade' THEN 5
+WHEN 'refund' THEN 6
+END
+
+SELECT COUNT(DISTINCT sub.user_id)
+FROM (
+SELECT user_id, transaction_type, `date`,
+MIN(date) OVER (PARTITION BY user_id) AS first_date
+FROM streamflow.transactions
+) AS sub
+WHERE `date` = first_date
+AND transaction_type = 'first_payment'
+
+SELECT COUNT(DISTINCT sub.user_id) AS users_direct_pay, u.country
+FROM (
+SELECT t.user_id, t.transaction_type, t.`date`,
+MIN(t.date) OVER (PARTITION BY t.user_id) AS first_date
+FROM streamflow.transactions t
+) AS sub
+JOIN users u
+ON sub.user_id = u.user_id
+WHERE `date` = first_date
+AND transaction_type = 'first_payment'
+GROUP BY u.country
+ORDER BY users_direct_pay DESC
+
+-- TASK 2
+
+SELECT SUM(amount_usd) AS revenue,
+DATE_FORMAT(`date`,'%Y-%m') AS month
+FROM streamflow.transactions
+GROUP BY month
+
+SELECT SUM(amount_usd) AS revenue,
+DATE_FORMAT(`date`,'%Y-%m') AS month
+FROM streamflow.transactions
+WHERE plan_id = 'P04'
+GROUP BY month
+
+SELECT COUNT(transaction_id) AS annual_count,
+DATE_FORMAT(`date`,'%Y-%m') AS month
+FROM streamflow.transactions
+WHERE plan_id = 'P04'
+GROUP BY month
+
+-- TASK 3
+
+SELECT SUM(t.amount_usd) AS revenue, u.country,
+DATE_FORMAT(date,'%Y-%m') AS month
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+GROUP BY month, u.country
+
+-- COHORT ANALYSIS 
+
+SELECT
+t.user_id,
+u.signup_date,
+DATE_FORMAT(u.signup_date,'%Y-%m') AS cohort_month,
+date AS transaction_date,
+t.transaction_type,
+sp.plan_name,
+sp.duration_days
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+JOIN streamflow.subscription_plans sp
+ON t.plan_id = sp.plan_id
+WHERE t.transaction_type IN ('first_payment','renewal','upgrade')
+ORDER BY t.user_id, t.date
+
+-- USERS AND COHORTS 
+
+SELECT
+user_id, MIN(date) AS first_payment_date,
+DATE_FORMAT(MIN(date),'%Y-%m') AS cohort_month
+FROM streamflow.transactions
+WHERE transaction_type = 'first_payment'
+GROUP BY user_id
+
+-- TASK 3
+
+SELECT COUNT(DISTINCT t.user_id) AS users_count,
+u.country,
+t.transaction_type
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+WHERE t.transaction_type IN ('trial_start','first_payment')
+GROUP BY 2,3
+ORDER BY
+u.country,
+CASE t.transaction_type
+WHEN 'trial_start' THEN 1
+WHEN 'first_payment' THEN 2
+END
+
+SELECT COUNT(DISTINCT t.user_id) AS users_count,
+u.acquisition_channel,
+t.transaction_type
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+WHERE t.transaction_type IN ('trial_start','first_payment')
+GROUP BY 2,3
+ORDER BY
+u.acquisition_channel,
+CASE t.transaction_type
+WHEN 'trial_start' THEN 1
+WHEN 'first_payment' THEN 2
+END
+
+-- LTV
+
+SELECT
+u.country,
+COUNT(DISTINCT u.user_id) AS users_count,
+SUM(t.amount_usd) AS revenue
+FROM streamflow.users u
+LEFT JOIN transactions t
+ON u.user_id = t.user_id
+GROUP BY u.country
+ORDER BY users_count DESC
+
+-- CAC
+
+WITH users_by_country AS (
+SELECT
+country,
+COUNT(DISTINCT user_id) AS users_count
+FROM streamflow.users
+GROUP BY country
+),
+spend_by_country AS (
+SELECT country,
+SUM(spend_usd) AS marketing_costs
+FROM streamflow.marketing_spend
+GROUP BY country
+)
+SELECT
+u.country,
+u.users_count,
+s.marketing_costs
+FROM users_by_country u
+LEFT JOIN spend_by_country s
+ON u.country = s.country
+ORDER BY u.users_count DESC
+
+-- PLATFORMS ANALYSIS
+SELECT u.platform, t.transaction_type, COUNT(DISTINCT t.user_id) AS users_count
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+WHERE t.transaction_type IN ('trial_start', 'first_payment')
+GROUP BY u.platform, t.transaction_type
+
+SELECT u.country, sp.plan_name, sp.list_price_usd, SUM(t.amount_usd) AS sum_paid,
+COUNT(DISTINCT t.user_id) AS users_count
+FROM streamflow.transactions t
+JOIN streamflow.users u
+ON t.user_id = u.user_id
+JOIN streamflow.subscription_plans sp
+ON t.plan_id = sp.plan_id
+WHERE u.country IN ('BR', 'MX', 'US')
+AND t.amount_usd > 0
+GROUP BY u.country, sp.plan_name, sp.list_price_usd
